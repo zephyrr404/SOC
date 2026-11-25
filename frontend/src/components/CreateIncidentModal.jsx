@@ -34,12 +34,23 @@ export function CreateIncidentModal({ open, event, projectId, onClose, initialSe
         technique: event.mitre?.technique || event.technique || null,
         event_summary: event.summary || event.raw?.message || null,
       } : null;
-      await api.incidents.create(projectId, {
+      const created = await api.incidents.create(projectId, {
         title: title.trim(),
         severity,
         description: description || null,
         context,
       });
+      if (event?.id && created?.id) {
+        try {
+          await api.incidents.addEvidence(created.id, {
+            source_event_id: event.id,
+            source: 'live_events',
+          });
+        } catch {
+          // Incident was created even if evidence attachment failed
+        }
+        queryClient.invalidateQueries({ queryKey: ['evidence', created.id] });
+      }
       queryClient.invalidateQueries({ queryKey: ['incidents', projectId] });
       queryClient.invalidateQueries({ queryKey: ['incidents'] });
       addToast('Incident created', 'success');

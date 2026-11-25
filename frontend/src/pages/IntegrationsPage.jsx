@@ -124,9 +124,14 @@ export function IntegrationsPage() {
             <>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm text-soc-slate">Connect your website</p>
-                <span className="px-3 py-1 text-xs rounded-md bg-soc-accent text-soc-on-accent">
-                  AI agent prompt
-                </span>
+                <div className="flex items-center gap-2">
+                  <Link to="/website-setup" className="text-xs text-soc-accent hover:underline">
+                    Full setup spec →
+                  </Link>
+                  <span className="px-3 py-1 text-xs rounded-md bg-soc-accent text-soc-on-accent">
+                    AI agent prompt
+                  </span>
+                </div>
               </div>
 
               <p className="text-xs text-soc-muted/70 mb-2">
@@ -140,7 +145,7 @@ export function IntegrationsPage() {
                 onClick={handleCopy}
                 className={`mt-3 text-xs px-3 py-1.5 rounded transition-all duration-200 ${
                   copied
-                    ? 'bg-green-600/12 text-green-700 border border-green-600/25'
+                    ? 'bg-green-600/[0.12] text-green-700 border border-green-600/25'
                     : 'bg-soc-panel hover:bg-soc-panel'
                 }`}
               >
@@ -171,7 +176,7 @@ export function IntegrationsPage() {
                 }}
                 className={`mt-3 text-xs px-3 py-1.5 rounded transition-all duration-200 ${
                   copied
-                    ? 'bg-green-600/12 text-green-700 border border-green-600/25'
+                    ? 'bg-green-600/[0.12] text-green-700 border border-green-600/25'
                     : 'bg-soc-panel hover:bg-soc-panel'
                 }`}
               >

@@ -10,7 +10,11 @@ export function NewProjectModal({ onClose, onCreated }) {
   const [name, setName] = useState('');
   const [type, setType] = useState('website');
   const [systemTab, setSystemTab] = useState('windows');
-  const [serverUrl, setServerUrl] = useState(window.location.origin);
+  const [serverUrl, setServerUrl] = useState(() => {
+    if (!window.location.protocol.startsWith('http')) return 'http://localhost:8000';
+    if (window.location.port === '5173') return `${window.location.protocol}//${window.location.hostname}:8000`;
+    return window.location.origin;
+  });
   const [description, setDescription] = useState('');
   const [project, setProject] = useState(null);
   const [apiKey, setApiKey] = useState('');
@@ -48,9 +52,11 @@ export function NewProjectModal({ onClose, onCreated }) {
     }
     setLoading(true);
     try {
-      const p = await api.projects.create({ name: name.trim(), type, description });
-      applyKeyResult(await createKey(p));
-      setProject(p);
+      const p = project || await api.projects.create({ name: name.trim(), type, description });
+      if (!project) {
+        applyKeyResult(await createKey(p));
+        setProject(p);
+      }
       setStep(2);
     } catch (e) {
       addToast(e.message || 'Failed to create project', 'error');

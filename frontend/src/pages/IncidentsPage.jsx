@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileDown, Plus, ShieldAlert, X } from 'lucide-react';
 import { api } from '../lib/api';
@@ -21,10 +21,10 @@ const STATUS_COLOR = {
 };
 
 const SEV_BADGE = {
-  critical: 'bg-red-500/12 text-red-600',
+  critical: 'bg-red-500/[0.12] text-red-600',
   high: 'bg-amber-500/15 text-amber-600',
-  medium: 'bg-sky-500/12 text-sky-600',
-  low: 'bg-emerald-500/12 text-emerald-600',
+  medium: 'bg-sky-500/[0.12] text-sky-600',
+  low: 'bg-emerald-500/[0.12] text-emerald-600',
 };
 
 export function agingLabel(incident) {
@@ -118,13 +118,6 @@ export function IncidentsPage() {
       else next.add(id);
       return next;
     });
-  };
-
-  const toggleAll = () => {
-    setGenError('');
-    setSelected((prev) =>
-      prev.size === (incidents?.length || 0) ? new Set() : new Set((incidents || []).map((i) => i.id))
-    );
   };
 
   const handleBulkPdf = async () => {
@@ -315,7 +308,7 @@ export function IncidentsPage() {
                           toggleSelect(inc.id);
                         }
                       }}
-                      className={`mt-0.5 w-4.5 h-4.5 shrink-0 rounded border flex items-center justify-center text-[10px] transition-colors ${
+                      className={`mt-0.5 w-[18px] h-[18px] shrink-0 rounded border flex items-center justify-center text-[10px] transition-colors ${
                         checked ? 'bg-soc-accent border-soc-accent text-white' : 'border-soc-border bg-white hover:border-soc-accent/50'
                       }`}
                     >
@@ -339,7 +332,7 @@ export function IncidentsPage() {
                           {(inc.tags || []).slice(0, 3).map((t) => (
                             <span key={t} className="text-[10px] bg-soc-panel text-soc-muted px-1.5 py-0.5 rounded-full">#{t}</span>
                           ))}
-                          {(() => { const a = agingLabel(inc); return a ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${a.hot ? 'bg-red-500/12 text-red-600' : 'bg-amber-500/15 text-amber-600'}`}>{a.text}</span> : null; })()}
+                          {(() => { const a = agingLabel(inc); return a ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${a.hot ? 'bg-red-500/[0.12] text-red-600' : 'bg-amber-500/15 text-amber-600'}`}>{a.text}</span> : null; })()}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">

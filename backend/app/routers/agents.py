@@ -1,25 +1,26 @@
 import asyncio
 import hashlib
-import json as jsonlib
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 from app.database import (
     get_db, get_next_id, NO_ID, get_events_collection,
     agent_events_collections, RAW_AGENT_COND,
 )
 from app.models.agent_key import (
-    AgentKeyCreate, AgentKeyResponse, AgentKeyCreated,
+    AgentKeyCreate, AgentKeyCreated,
     EnrollRequest, EnrollResponse, AgentLogEntry, AgentLogBulk,
-    generate_raw_key, generate_key_prefix, hash_raw_key,
+    generate_raw_key, hash_raw_key,
 )
 from app.auth import get_current_user, get_current_agent, create_agent_token
 from app.dependencies import get_owned_project
 from app.models.cleanup import CleanupFilters, CleanupExecute
+from app.routers.ingest import _real_client_ip
 from app.services.elastic import index_agent_log, index_event, index_events_bulk, index_agent_logs_bulk, delete_agent_logs_by_query
 from app.services.geoip import lookup as geoip_lookup
 from app.services.log_parser import parse_log
@@ -30,7 +31,6 @@ from app.services.risk_engine import compute_risk_score
 from app.services.mitre import get_mitre
 from app.services.audit import record_cleanup
 from app.ws_manager import broadcast
-from app.config import PUBLIC_BACKEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ cleanup_router = APIRouter(tags=["agent-logs"])
 _usp_js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "usp.js")
 
 
-def _parse_and_enrich(message: str, meta: dict | None) -> tuple[str, dict, dict]:
+def _parse_and_enrich(message: str, meta: dict | None, project_id: int | None = None) -> tuple[str, dict, dict]:
     """Normalize a raw log line → (summary, parsed, enriched).
 
     enriched carries real source-IP intelligence: geo lookup + known-bad match.
@@ -57,7 +57,7 @@ def _parse_and_enrich(message: str, meta: dict | None) -> tuple[str, dict, dict]
         geo = geoip_lookup(ip)
         if geo:
             enriched["geo"] = geo
-        if is_malicious(ip):
+        if is_malicious(ip, project_id=project_id):
             enriched["threat_match"] = True
     return summary, parsed, enriched
 
@@ -180,8 +180,11 @@ def create_agent_key(body: AgentKeyCreate, user=Depends(get_current_user), db=De
 
 
 @router.get("/keys", summary="List the user's agent keys")
-def list_agent_keys(user=Depends(get_current_user), db=Depends(get_db)):
-    keys = list(db.agent_keys.find({"created_by": user["id"]}, {"_id": 0, "key_hash": 0}).sort("created_at", -1))
+def list_agent_keys(project_id: int | None = Query(None), user=Depends(get_current_user), db=Depends(get_db)):
+    q: dict = {"created_by": user["id"]}
+    if project_id is not None:
+        q["project_id"] = project_id
+    keys = list(db.agent_keys.find(q, {"_id": 0, "key_hash": 0}).sort("created_at", -1))
     return keys
 
 
@@ -216,7 +219,7 @@ def _clean_ip(value: str | None, request: Request) -> str | None:
     """Reject junk IPs ("0", "unknown", ...) and fall back to the caller IP."""
     val = str(value or "").strip()
     if val in ("0", "unknown", "0.0.0.0", ""):
-        return request.client.host if request.client else None
+        return _real_client_ip(request) or None
     return val
 
 
@@ -227,11 +230,12 @@ def _junk_ip(value) -> bool:
 def _refresh_agent_ip(db, agent_id: int, request: Request) -> str | None:
     """If the stored agent IP is junk, return the caller IP as seen by the
     server (every log/beat request originates from the agent itself)."""
-    if not request.client:
+    caller = _real_client_ip(request)
+    if not caller:
         return None
     key = db.agent_keys.find_one({"id": agent_id}, {"ip_address": 1})
     if key and _junk_ip(key.get("ip_address")):
-        return request.client.host
+        return caller
     return None
 
 
@@ -314,7 +318,7 @@ def list_agent_logs(
     if project_id is not None:
         q["project_id"] = {"$in": [project_id, str(project_id)]}
     if query:
-        rx = {"$regex": query, "$options": "i"}
+        rx = {"$regex": re.escape(query), "$options": "i"}
         q["$or"] = [{"summary": rx}, {"raw.message": rx}]
     docs = []
     total = 0
@@ -363,7 +367,9 @@ async def agent_log(body: AgentLogEntry, request: Request, agent=Depends(get_cur
     source = _agent_events_source(agent.get("os_type"))
     events_col = get_events_collection(source)
 
-    summary, parsed, enriched = _parse_and_enrich(body.message, dict(body.meta) if body.meta else None)
+    summary, parsed, enriched = await run_in_threadpool(
+        _parse_and_enrich, body.message, dict(body.meta) if body.meta else None, proj_id
+    )
 
     is_security = body.stage != "heartbeat" and is_relevant_entry(body.meta, parsed)
     category = _entry_category(body.stage, is_security)
@@ -376,7 +382,7 @@ async def agent_log(body: AgentLogEntry, request: Request, agent=Depends(get_cur
     meta = {**body.meta, "trace_id": trace_id} if body.meta else {"trace_id": trace_id}
     doc = _build_agent_doc(
         agent, source, category, event_type, summary, parsed, enriched,
-        body.message, meta, trace_id, now.isoformat(), level=body.level,
+        body.message, meta, trace_id, now.isoformat(timespec="microseconds"), level=body.level,
         stage=body.stage,
     )
     doc["mitre"] = get_mitre(
@@ -388,7 +394,7 @@ async def agent_log(body: AgentLogEntry, request: Request, agent=Depends(get_cur
     # Risk score is computed against the EXISTING documents (burst windows must
     # not count the entry being written right now), then stored on the doc.
     if is_security:
-        doc["enriched"]["risk_score"] = compute_risk_score(doc, db)
+        doc["enriched"]["risk_score"] = await run_in_threadpool(compute_risk_score, doc, db)
 
     await run_in_threadpool(events_col.insert_one, doc)
     await run_in_threadpool(index_agent_log, doc)
@@ -428,7 +434,7 @@ async def agent_log_bulk(body: AgentLogBulk, request: Request, agent=Depends(get
         ts = _normalize_ts(entry.event_time or now.isoformat())
         meta = {**entry.meta, "trace_id": trace_id} if entry.meta else {"trace_id": trace_id}
 
-        summary, parsed, enriched = _parse_and_enrich(entry.message, dict(entry.meta) if entry.meta else None)
+        summary, parsed, enriched = _parse_and_enrich(entry.message, dict(entry.meta) if entry.meta else None, proj_id)
 
         is_security = entry.stage != "heartbeat" and is_relevant_entry(entry.meta, parsed)
         category = _entry_category(entry.stage, is_security)
@@ -449,7 +455,7 @@ async def agent_log_bulk(body: AgentLogBulk, request: Request, agent=Depends(get
             parsed.get("action"),
         )
         if is_security:
-            doc["enriched"]["risk_score"] = compute_risk_score(doc, db)
+            doc["enriched"]["risk_score"] = await run_in_threadpool(compute_risk_score, doc, db)
 
         log_docs.append(doc)
         if is_security:

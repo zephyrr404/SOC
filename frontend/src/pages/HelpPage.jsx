@@ -70,7 +70,7 @@ const SECTIONS = [
       <>
         <p>The <Link to="/threat-intel" className="text-soc-accent hover:underline">Threat Intelligence page</Link> aggregates the selected window (24h / 7d / 30d): feed status, attack timeline (click a bar to drill into that bucket), ATT&CK tactic matrix, attack narratives, a correlation graph of IPs → hosts → users → techniques → incidents, top risk hosts, known threat IPs, and geo breakdown.</p>
         <ul className="list-disc pl-5 space-y-1">
-          <li>Clicking a feed pill, host, or technique filters <em>every</em> panel — the graph can seed filters too.</li>
+          <li>Clicking a host or technique filters <em>every</em> panel — the graph can seed filters too; clicking a feed pill narrows Matched Events and the Indicator List.</li>
           <li>Matched events support inline triage (status, severity override, assignee, notes).</li>
           <li>Internal scanners showing up as threats? Add them to the <strong>IOC allowlist</strong> — they never flag again for that project.</li>
         </ul>
@@ -195,7 +195,7 @@ export function HelpPage() {
               to={s.to}
               className="glass-card rounded-xl p-4 block h-full hover:border-soc-accent/40 hover:shadow-lift transition-all group"
             >
-              <span className="w-7 h-7 rounded-full bg-soc-accent/12 text-soc-accent text-xs font-bold flex items-center justify-center mb-2">
+              <span className="w-7 h-7 rounded-full bg-soc-accent/[0.12] text-soc-accent text-xs font-bold flex items-center justify-center mb-2">
                 {s.n}
               </span>
               <p className="text-sm font-semibold text-soc-text group-hover:text-soc-accent transition-colors">{s.title}</p>

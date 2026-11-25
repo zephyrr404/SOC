@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
-from app.database import get_db, NO_ID, all_events_collections, agent_events_collections, EVENTS_VIEW_COND
+from fastapi import APIRouter, Depends, Query
+from app.database import get_db, all_events_collections, agent_events_collections, EVENTS_VIEW_COND
 from app.auth import get_current_user
 from app.dependencies import get_owned_project
 from app.services.elastic import _es_up
@@ -29,13 +29,22 @@ def project_overview(
     project_id = project["id"]
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=hours)
+    start_hint = (start - timedelta(seconds=1)).isoformat()
     pid_q = {"$in": [project_id, str(project_id)]}
 
     events = []
+    total_events = 0
     for col in all_events_collections():
+        total_events += col.count_documents({"project_id": pid_q, "$and": [EVENTS_VIEW_COND]})
         events.extend(col.find(
-            {"project_id": pid_q, "$and": [EVENTS_VIEW_COND]},
-            {"timestamp": 1, "event_type": 1, "source": 1, "enriched.ip": 1, "summary": 1, "raw.hostname": 1},
+            {
+                "project_id": pid_q,
+                "$and": [
+                    EVENTS_VIEW_COND,
+                    {"$or": [{"timestamp": {"$gte": start_hint}}, {"timestamp": {"$gte": start}}]},
+                ],
+            },
+            {"timestamp": 1, "event_type": 1, "source": 1, "enriched.ip": 1, "enriched.severity": 1, "summary": 1, "raw.hostname": 1},
         ))
 
     in_range = []
@@ -45,8 +54,14 @@ def project_overview(
             in_range.append((e, ts))
     in_range.sort(key=lambda x: x[1], reverse=True)
 
+    def _sev(ev):
+        s = (ev.get("enriched") or {}).get("severity")
+        if s in ("critical", "high", "medium", "low", "info"):
+            return s
+        return ev.get("event_type", "unknown")
+
     event_count = len(in_range)
-    alert_count = sum(1 for e, _ in in_range if e.get("event_type") in ("critical", "high"))
+    alert_count = sum(1 for e, _ in in_range if _sev(e) in ("critical", "high"))
 
     top_ips = Counter()
     top_types = Counter()
@@ -54,7 +69,7 @@ def project_overview(
         ip = (e.get("enriched") or {}).get("ip")
         if ip:
             top_ips[ip] += 1
-        top_types[e.get("event_type", "unknown")] += 1
+        top_types[_sev(e)] += 1
 
     if hours <= 48:
         fmt = "%Y-%m-%d %H:00"
@@ -98,7 +113,7 @@ def project_overview(
             "last_seen_at": last.isoformat() if last else None,
         })
 
-    open_incidents = db.incidents.count_documents({"project_id": project_id, "status": {"$ne": "resolved"}})
+    open_incidents = db.incidents.count_documents({"project_id": project_id, "status": {"$nin": ["resolved", "false_positive"]}})
 
     return {
         "hours": hours,
@@ -116,5 +131,5 @@ def project_overview(
         "severity_distribution": {t: c for t, c in top_types.items()},
         "chart": chart,
         "agents": agents,
-        "total_events": len(events),
+        "total_events": total_events,
     }

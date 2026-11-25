@@ -20,10 +20,13 @@ ALLOWED_WINDOWS_EVENTS = {
         4634: "info",     # logoff
         4648: "medium",   # explicit credential logon
         4672: "medium",   # privileged/special logon
+        4688: "info",     # new process created
+        4698: "medium",   # scheduled task created
         4720: "medium",   # account created
         4722: "medium",   # account enabled
         4724: "high",     # password reset attempt
         4732: "high",     # member added to security-enabled local group
+        4740: "medium",   # user account locked out
         4756: "high",     # member added to security-enabled universal group
         4768: "info",     # Kerberos TGT requested
         4769: "info",     # Kerberos service ticket requested

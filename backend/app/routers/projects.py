@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
 from app.database import get_db, get_next_id, NO_ID, all_events_collections
 from app.auth import get_current_user
-from app.models.project import ProjectCreate, ProjectUpdate, ProjectResponse
+from app.models.project import ProjectCreate, ProjectResponse
 from app.services.reachable import reachable_backend_url
 from app.services.prompt_templates import build_ai_agent_prompt, build_website_setup_prompt
 from app.services.elastic import delete_events_by_query, delete_agent_logs_by_query
@@ -187,6 +187,9 @@ def delete_project(project=Depends(get_owned_project), db=Depends(get_db)):
     incident_ids = [i["id"] for i in db.incidents.find({"project_id": project_id}, {"id": 1})]
     db.incident_evidence.delete_many({"incident_id": {"$in": incident_ids}})
     db.incidents.delete_many({"project_id": project_id})
+    db.threat_indicators.delete_many({"project_id": project_id})
+    db.threat_suppressions.delete_many({"project_id": project_id})
+    db.ioc_allowlist.delete_many({"project_id": project_id})
     return {"message": "Project deleted"}
 
 

@@ -141,7 +141,7 @@ export function SettingsPage() {
               Member since {user?.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
             </p>
           </div>
-          <span className="ml-auto hidden sm:flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full bg-green-600/12 text-green-700 border border-green-600/20 shrink-0">
+          <span className="ml-auto hidden sm:flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full bg-green-600/[0.12] text-green-700 border border-green-600/20 shrink-0">
             <ShieldCheck size={12} /> signed in
           </span>
         </div>

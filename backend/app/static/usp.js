@@ -49,12 +49,28 @@
     return SENSITIVE_NAME_RE.test(String(name || ""));
   }
 
-  function sensitiveType(type) {
-    return type === "password";
+  function sensitiveType(type, autocomplete) {
+    var ac = String(autocomplete || "").toLowerCase();
+    return type === "password" || ac.indexOf("password") !== -1 || ac.indexOf("cc-") === 0;
+  }
+
+  function redactValue(val) {
+    if (val === null || val === undefined) return val;
+    if (Array.isArray(val)) return val.slice(0, 50).map(redactValue);
+    if (typeof val === "object") {
+      var out = {};
+      var keys = Object.keys(val);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        out[k] = isSensitiveName(k) ? "[REDACTED]" : redactValue(val[k]);
+      }
+      return out;
+    }
+    return typeof val === "string" ? val.slice(0, 500) : val;
   }
 
   function fieldValue(el) {
-    if (sensitiveType(el.type) || isSensitiveName(el.name) || isSensitiveName(el.id)) return null;
+    if (sensitiveType(el.type, el.autocomplete) || isSensitiveName(el.name) || isSensitiveName(el.id)) return null;
     return String(el.value || "").slice(0, 200);
   }
 
@@ -91,6 +107,7 @@
   }
 
   function enqueue(type, raw) {
+    if (queue.length >= 500) queue.shift();
     queue.push(baseEvent(type, raw));
     scheduleFlush();
   }
@@ -189,12 +206,12 @@
         id: el.id || "",
         classes: cls,
         text: el.id ? "" : visibleText(el, 100),
-        href: el.href || "",
+        href: typeof el.href === "string" ? el.href : "",
         name: el.name || "",
         type: el.type || "",
-          value: (sensitiveType(el.type) || isSensitiveName(el.name) || isSensitiveName(el.id)) ? null : String(el.value || "").slice(0, 200),
-          x: e.clientX,
-          y: e.clientY
+        value: fieldValue(el),
+        x: e.clientX,
+        y: e.clientY
       };
       enqueue("click", raw);
     },
@@ -265,7 +282,7 @@
         var el = f.elements[i];
         if (!el.name) continue;
         var type = el.type || el.tagName.toLowerCase();
-        var sensitive = sensitiveType(type) || isSensitiveName(el.name) || isSensitiveName(el.id);
+        var sensitive = sensitiveType(type, el.autocomplete) || isSensitiveName(el.name) || isSensitiveName(el.id);
         var entry = {
           name: el.name,
           type: type,
@@ -297,7 +314,7 @@
       var body = null;
       if (init && init.body) {
         try {
-          body = JSON.parse(init.body);
+          body = redactValue(JSON.parse(init.body));
         } catch (e) {
           body = String(init.body).slice(0, 500);
         }

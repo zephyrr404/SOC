@@ -69,7 +69,7 @@ export function OverviewPage() {
     refetchInterval: 30000,
   });
 
-  useWebSocket(pid, useCallback((event) => {
+  const { connected } = useWebSocket(pid, useCallback((event) => {
     liveRef.current = [event, ...liveRef.current].slice(0, 8);
     setLiveEvents(liveRef.current);
   }, []));
@@ -186,8 +186,9 @@ export function OverviewPage() {
         <div className="glass-card rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-soc-text">Live Activity</h2>
-            <span className="flex items-center gap-1.5 text-[10px] font-medium text-green-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-soc-sage animate-pulse" /> live
+            <span className={`flex items-center gap-1.5 text-[10px] font-medium ${connected ? 'text-green-700' : 'text-soc-muted'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-soc-sage animate-pulse' : 'bg-amber-500'}`} />
+              {connected ? 'live' : 'connecting'}
             </span>
           </div>
           <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
@@ -223,7 +224,7 @@ export function OverviewPage() {
                     </span>
                   </span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                    a.status === 'active' ? 'bg-green-600/12 text-green-700' : 'bg-soc-panel text-soc-muted'
+                    a.status === 'active' ? 'bg-green-600/[0.12] text-green-700' : 'bg-soc-panel text-soc-muted'
                   }`}>
                     {a.status}
                   </span>
@@ -247,11 +248,11 @@ export function OverviewPage() {
             <h2 className="text-sm font-semibold text-soc-text">Event Severity Breakdown</h2>
           </div>
           {(() => {
-            const SEV_COLORS = { critical: '#DC2626', high: '#EA580C', medium: '#D97706', info: '#2563EB' };
-            const SEV_LABELS = { critical: 'Critical', high: 'High', medium: 'Medium', info: 'Low / Info' };
+            const SEV_COLORS = { critical: '#DC2626', high: '#EA580C', medium: '#D97706', low: '#0284C7', info: '#64748B' };
+            const SEV_LABELS = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
             const dist = ov?.severity_distribution || {};
             const total = Object.values(dist).reduce((a, b) => a + b, 0);
-            const sevData = ['critical', 'high', 'medium', 'info']
+            const sevData = ['critical', 'high', 'medium', 'low', 'info']
               .filter((k) => dist[k])
               .map((k) => ({
                 label: SEV_LABELS[k],
@@ -357,9 +358,9 @@ function IncidentList({ pid }) {
         >
           <span className="text-sm truncate flex-1 min-w-0">{inc.title}</span>
           <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ml-2 ${
-            inc.status === 'open' ? 'bg-red-500/12 text-red-600' :
+            inc.status === 'open' ? 'bg-red-500/[0.12] text-red-600' :
             inc.status === 'investigating' ? 'bg-amber-500/15 text-amber-600' :
-            'bg-green-600/12 text-green-700'
+            'bg-green-600/[0.12] text-green-700'
           }`}>
             {inc.status}
           </span>

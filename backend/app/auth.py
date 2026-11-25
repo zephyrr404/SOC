@@ -1,20 +1,30 @@
 import bcrypt
 from datetime import datetime, timedelta, timezone
-from fastapi import Depends, HTTPException, status, Request, Header
+from fastapi import Depends, HTTPException, Request, Header
 from fastapi.responses import Response
 from jose import JWTError, jwt
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, SECURE_COOKIES
 from app.database import get_db
 
 COOKIE_NAME = "soc_token"
+MAX_BCRYPT_BYTES = 72
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    raw = password.encode("utf-8")
+    if len(raw) > MAX_BCRYPT_BYTES:
+        raise HTTPException(status_code=400, detail="Password must be at most 72 bytes")
+    return bcrypt.hashpw(raw, bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    raw = plain.encode("utf-8")
+    if len(raw) > MAX_BCRYPT_BYTES:
+        return False
+    try:
+        return bcrypt.checkpw(raw, hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_access_token(data: dict) -> str:
@@ -68,8 +78,9 @@ def get_current_user(request: Request, db=Depends(get_db)):
     user = db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if int(payload.get("tv", 0)) != int(user.get("token_version", 0)):
+        raise HTTPException(status_code=401, detail="Session expired, please log in again")
     return user
-
 
 
 def get_current_agent(authorization: str = Header(default=""), db=Depends(get_db)):
@@ -86,7 +97,7 @@ def get_current_agent(authorization: str = Header(default=""), db=Depends(get_db
         if sub is None:
             raise HTTPException(status_code=401, detail="Invalid token")
         agent_id = int(sub)
-    except JWTError:
+    except (JWTError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid agent token")
     agent = db.agent_keys.find_one({"id": agent_id})
     if not agent or agent.get("status") == "revoked":

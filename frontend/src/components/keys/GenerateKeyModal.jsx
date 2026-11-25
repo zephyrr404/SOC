@@ -176,7 +176,7 @@ export function GenerateKeyModal({ projectId, onClose, initialPlatform = null })
                     onClick={() => copy(generatedKey)}
                     className={`shrink-0 px-2 py-1 text-xs rounded transition-all duration-200 flex items-center gap-1.5 ${
                       copied
-                        ? 'bg-green-600/12 text-green-700 border border-green-600/25'
+                        ? 'bg-green-600/[0.12] text-green-700 border border-green-600/25'
                         : 'bg-soc-panel hover:bg-soc-card text-soc-text'
                     }`}
                   >
@@ -222,7 +222,7 @@ export function GenerateKeyModal({ projectId, onClose, initialPlatform = null })
                         onClick={() => copySnippet(snippetTab === 'script' ? scriptTag : aiAgentPrompt)}
                         className={`mt-2 text-xs px-3 py-1.5 rounded transition-all duration-200 ${
                           snippetCopied
-                            ? 'bg-green-600/12 text-green-700 border border-green-600/25'
+                            ? 'bg-green-600/[0.12] text-green-700 border border-green-600/25'
                             : 'bg-soc-panel hover:bg-soc-card'
                         }`}
                       >
@@ -242,7 +242,7 @@ export function GenerateKeyModal({ projectId, onClose, initialPlatform = null })
                         onClick={() => copySnippet(snippetTab === 'script' ? scriptTag : aiAgentPrompt)}
                         className={`mt-2 text-xs px-3 py-1.5 rounded transition-all duration-200 ${
                           snippetCopied
-                            ? 'bg-green-600/12 text-green-700 border border-green-600/25'
+                            ? 'bg-green-600/[0.12] text-green-700 border border-green-600/25'
                             : 'bg-soc-panel hover:bg-soc-card'
                         }`}
                       >

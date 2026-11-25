@@ -45,6 +45,7 @@ _feeds: dict[str, set[str]] = {}          # source_feed -> set of values (IP or 
 _feed_flat: set[str] = set()              # union of all feed values — hot lookup path
 _networks: dict[str, list] = {}           # source_feed -> [ip_network]
 _manual: set[str] = set()
+_manual_by_project: dict[int, set[str]] = {}
 _lock = threading.Lock()
 _last_sync: float | None = None
 _last_error: str | None = None
@@ -139,19 +140,55 @@ def _category_of(name: str) -> str:
     return "feed"
 
 
-def _load_manual_from_db() -> set[str]:
+def _load_manual_from_db() -> dict[int, set[str]]:
     """Load all persisted manual IP indicators into memory at startup."""
-    loaded: set[str] = set()
+    loaded: dict[int, set[str]] = {}
     try:
         from app.database import db  # noqa: PLC0415
 
         for doc in db.threat_indicators.find({"source": "manual", "type": "ip"}):
             value = str(doc.get("value") or "").strip()
-            if value:
-                loaded.add(value)
+            pid = doc.get("project_id")
+            if value and pid is not None:
+                try:
+                    loaded.setdefault(int(pid), set()).add(value)
+                except (TypeError, ValueError):
+                    pass
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to load manual indicators: %s", e)
     return loaded
+
+
+def _load_cache_from_db() -> None:
+    """Restore the last persisted threat-feed snapshot from Mongo on startup."""
+    global _feed_flat, _last_sync
+    try:
+        from app.database import db  # noqa: PLC0415
+
+        col = db.threat_feed_cache
+        restored: dict[str, set[str]] = {}
+        restored_nets: dict[str, list] = {}
+        for doc in col.find({"source_feed": {"$exists": True}}):
+            name = doc.get("source_feed")
+            val = str(doc.get("value") or "").strip()
+            if not name or not val:
+                continue
+            restored.setdefault(name, set()).add(val)
+            if "/" in val:
+                try:
+                    restored_nets.setdefault(name, []).append(ipaddress.ip_network(val, strict=False))
+                except ValueError:
+                    pass
+        if restored:
+            with _lock:
+                _feeds.update(restored)
+                _networks.update(restored_nets)
+                for name, vals in restored.items():
+                    _feed_counts[name] = len(vals)
+                _feed_flat = {v for values in _feeds.values() for v in values}
+            logger.info("Restored %d cached threat-feed indicators from Mongo", len(_feed_flat))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Threat feed cache restore failed: %s", e)
 
 
 def refresh() -> None:
@@ -192,8 +229,12 @@ def _loop() -> None:
 
 
 def start_refresh_loop() -> None:
-    """First sync inline (so data exists before the API answers), then daemon loop."""
-    refresh()
+    """Restore cached indicators immediately, then refresh feeds in background."""
+    global _manual_by_project
+    _load_cache_from_db()
+    loaded_manual = _load_manual_from_db()
+    with _lock:
+        _manual_by_project = loaded_manual
     thread = threading.Thread(target=_loop, daemon=True, name="threat-feed")
     thread.start()
 
@@ -210,27 +251,39 @@ def _matches_networks(ip: str) -> bool:
     return False
 
 
-def is_malicious(ip: str) -> bool:
+def is_malicious(ip: str, project_id: int | None = None) -> bool:
     if not ip:
         return False
     with _lock:
         if ip in _manual or ip in _feed_flat:
             return True
+        if project_id is not None:
+            try:
+                if ip in _manual_by_project.get(int(project_id), ()):
+                    return True
+            except (TypeError, ValueError):
+                pass
         if _networks:
             return _matches_networks(ip)
         return False
 
 
-def add_ip(ip: str) -> None:
+def add_ip(ip: str, project_id: int | None = None) -> None:
     """Add a manual IP to the in-memory set (persisted by the caller)."""
     with _lock:
-        _manual.add(ip)
+        if project_id is not None:
+            _manual_by_project.setdefault(int(project_id), set()).add(ip)
+        else:
+            _manual.add(ip)
 
 
-def remove_ip(ip: str) -> None:
+def remove_ip(ip: str, project_id: int | None = None) -> None:
     """Drop a manual IP from the in-memory set (doc deleted by the caller)."""
     with _lock:
-        _manual.discard(ip)
+        if project_id is not None:
+            _manual_by_project.get(int(project_id), set()).discard(ip)
+        else:
+            _manual.discard(ip)
 
 
 def get_feed_ips() -> set[str]:

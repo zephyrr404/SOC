@@ -21,6 +21,12 @@ if [[ -z "$API_KEY" ]]; then
     echo "Error: --api-key is required"
     exit 1
 fi
+API_BASE="${API_BASE%/}"
+
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required"
+    exit 1
+fi
 
 HOSTNAME=$(hostname)
 OS=$(grep -m1 PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || uname -s)
@@ -33,16 +39,16 @@ if [[ -z "$IP" ]] || [[ "$IP" == "0.0.0.0" ]]; then
 fi
 FINGERPRINT=$(cat /etc/machine-id 2>/dev/null || echo "unknown")
 
-ENROLL_BODY=$(cat <<EOF
-{
-  "api_key": "$API_KEY",
-  "hostname": "$HOSTNAME",
-  "os_type": "$OS",
-  "ip_address": "$IP",
-  "fingerprint_seed": "$FINGERPRINT"
-}
-EOF
-)
+ENROLL_BODY=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "api_key": sys.argv[1],
+    "hostname": sys.argv[2],
+    "os_type": sys.argv[3],
+    "ip_address": sys.argv[4],
+    "fingerprint_seed": sys.argv[5],
+}))
+' "$API_KEY" "$HOSTNAME" "$OS" "$IP" "$FINGERPRINT")
 
 ENROLL_RESP=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE/agents/enroll" \
   -H "Content-Type: application/json" \
@@ -52,30 +58,38 @@ HTTP_CODE=$(echo "$ENROLL_RESP" | tail -1)
 BODY=$(echo "$ENROLL_RESP" | sed '$d')
 
 if [[ "$HTTP_CODE" == "409" ]]; then
-    DETAIL=$(echo "$BODY" | jq -r '.detail')
+    DETAIL=$(python3 -c 'import json, sys; print(json.loads(sys.stdin.read()).get("detail", ""))' <<< "$BODY" 2>/dev/null || echo "$BODY")
     echo "Already enrolled to a different system: $DETAIL"
     exit 1
 elif [[ "$HTTP_CODE" == "200" ]]; then
-    AGENT_TOKEN=$(echo "$BODY" | jq -r '.agent_token')
-    AGENT_ID=$(echo "$BODY" | jq -r '.agent_id')
+    AGENT_TOKEN=$(python3 -c 'import json, sys; print(json.loads(sys.stdin.read())["agent_token"])' <<< "$BODY")
+    AGENT_ID=$(python3 -c 'import json, sys; print(json.loads(sys.stdin.read())["agent_id"])' <<< "$BODY")
 else
     echo "Enrollment failed (HTTP $HTTP_CODE): $BODY"
     exit 1
 fi
 
 mkdir -p /etc/soc-agent
+chmod 700 /etc/soc-agent
 mkdir -p /opt/soc-agent
 
-cat > /etc/soc-agent/config.json <<EOF
-{
-  "api_key": "$API_KEY",
-  "api_base": "$API_BASE",
-  "agent_token": "$AGENT_TOKEN",
-  "agent_id": $AGENT_ID,
-  "flush_interval_seconds": 1,
-  "heartbeat_interval_seconds": 30
+python3 -c '
+import json, sys
+cfg = {
+    "api_key": sys.argv[1],
+    "api_base": sys.argv[2],
+    "agent_token": sys.argv[3],
+    "agent_id": int(sys.argv[4]),
+    "hostname": sys.argv[5],
+    "os_type": sys.argv[6],
+    "fingerprint_seed": sys.argv[7],
+    "flush_interval_seconds": 1,
+    "heartbeat_interval_seconds": 30,
 }
-EOF
+with open("/etc/soc-agent/config.json", "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+' "$API_KEY" "$API_BASE" "$AGENT_TOKEN" "$AGENT_ID" "$HOSTNAME" "$OS" "$FINGERPRINT"
+chmod 600 /etc/soc-agent/config.json
 
 # -- Remove the legacy bash agent (heartbeat + journalctl loops) --
 systemctl disable --now soc-agent.service 2>/dev/null || true
@@ -116,7 +130,7 @@ EOF
 fi
 
 # -- Register the journal watcher service --
-if command -v systemctl &> /dev/null; then
+if command -v systemctl &> /dev/null && systemctl show-environment &> /dev/null; then
     cat > /etc/systemd/system/soc-agent-journal.service <<EOF
 [Unit]
 Description=SOC Agent Journal Watcher
@@ -124,7 +138,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/soc-agent/journal_watcher.py "$API_BASE" "$AGENT_TOKEN"
+ExecStart=/usr/bin/python3 /opt/soc-agent/journal_watcher.py --config /etc/soc-agent/config.json
 Restart=always
 RestartSec=5
 SupplementaryGroups=systemd-journal
@@ -137,8 +151,12 @@ EOF
 
     systemctl daemon-reload && systemctl enable --now soc-agent-journal.service
 else
-    echo "Warning: systemctl not found - start manually:"
-    echo "  python3 /opt/soc-agent/journal_watcher.py $API_BASE $AGENT_TOKEN"
+    echo "systemd not active — starting background watcher with @reboot cron fallback..."
+    if command -v crontab &> /dev/null; then
+        (crontab -l 2>/dev/null | grep -v '/opt/soc-agent/journal_watcher.py'; echo "@reboot /usr/bin/python3 /opt/soc-agent/journal_watcher.py --config /etc/soc-agent/config.json >/var/log/soc-agent.log 2>&1") | crontab -
+    fi
+    pkill -f '/opt/soc-agent/journal_watcher.py' 2>/dev/null || true
+    nohup /usr/bin/python3 /opt/soc-agent/journal_watcher.py --config /etc/soc-agent/config.json >/var/log/soc-agent.log 2>&1 &
 fi
 
 echo "SOC Agent installed successfully on $HOSTNAME"

@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timezone
 from fastapi import WebSocket
 
 _rooms: dict[str, set[WebSocket]] = {}

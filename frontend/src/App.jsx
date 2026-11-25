@@ -17,6 +17,7 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { IncidentDetailPage } from './pages/IncidentDetailPage';
 import { APIKeysPage } from './pages/APIKeysPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
+import { WebsiteSetupPage } from './pages/WebsiteSetupPage';
 import { DataCleanupPage } from './pages/DataCleanupPage';
 import { HelpPage } from './pages/HelpPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -58,6 +59,7 @@ function AppRoutes() {
       <Route path="/incidents/:incidentId" element={<ProtectedRoute>{shell(project(<IncidentDetailPage />))}</ProtectedRoute>} />
       <Route path="/api-keys" element={<ProtectedRoute>{shell(project(<APIKeysPage />))}</ProtectedRoute>} />
       <Route path="/integrations" element={<ProtectedRoute>{shell(project(<IntegrationsPage />))}</ProtectedRoute>} />
+      <Route path="/website-setup" element={<ProtectedRoute>{shell(project(<WebsiteSetupPage />))}</ProtectedRoute>} />
       <Route path="/data-cleanup" element={<ProtectedRoute>{shell(project(<DataCleanupPage />))}</ProtectedRoute>} />
       <Route path="/" element={user ? <Navigate to="/workspace" replace /> : <Navigate to="/login" replace />} />
       <Route path="*" element={user ? <Navigate to="/workspace" replace /> : <Navigate to="/login" replace />} />

@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from app.config import SECRET_KEY, ALGORITHM, CORS_ORIGINS
+from app.config import CORS_ORIGINS
 from app.database import ensure_indexes, db
 from app.services.elastic import ensure_index, es_healthy
 from app.routers.auth import router as auth_router

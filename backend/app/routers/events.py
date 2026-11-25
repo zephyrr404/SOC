@@ -31,6 +31,18 @@ RAW_CATEGORIES = ("heartbeat", "lifecycle")
 NAMED_CATEGORIES = (*RAW_CATEGORIES, "security_event")
 
 
+def _ts_sort_key(doc: dict):
+    ts = doc.get("timestamp")
+    if isinstance(ts, datetime):
+        return (ts.timestamp(), str(doc.get("id", "")))
+    if isinstance(ts, str):
+        try:
+            return (datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp(), str(doc.get("id", "")))
+        except ValueError:
+            pass
+    return (0.0, str(doc.get("id", "")))
+
+
 def _base_mongo_q(project_id: int, event_type: str | None, severity: str | None,
                   query: str | None, host: str | None, category: str | None = None) -> dict:
     mongo_q = {"project_id": {"$in": [project_id, str(project_id)]}}
@@ -38,14 +50,15 @@ def _base_mongo_q(project_id: int, event_type: str | None, severity: str | None,
     # excludes uncategorized website docs); unset keeps the curated surface.
     conds = [{"category": category}] if category in NAMED_CATEGORIES else [EVENTS_VIEW_COND]
     if event_type:
-        mongo_q["event_type"] = event_type
-    elif severity:
-        mongo_q["event_type"] = severity
+        conds.append({"$or": [{"event_type": event_type}, {"enriched.severity": event_type}]})
+    if severity:
+        conds.append({"$or": [{"event_type": severity}, {"enriched.severity": severity}]})
     if query:
         rx = re.compile(re.escape(query), re.IGNORECASE)
-        conds.append({"$or": [{"summary": rx}, {"raw.message": rx}, {"raw.url": rx}]})
+        conds.append({"$or": [{"summary": rx}, {"raw.message": rx}, {"raw.url": rx}, {"enriched.ip": rx}, {"id": rx}]})
     if host:
-        mongo_q["raw.hostname"] = re.compile(re.escape(host), re.IGNORECASE)
+        hrx = re.compile(re.escape(host), re.IGNORECASE)
+        conds.append({"$or": [{"hostname": hrx}, {"raw.hostname": hrx}]})
     mongo_q["$and"] = conds
     return mongo_q
 
@@ -96,7 +109,7 @@ def list_events(
     if category not in NAMED_CATEGORIES:
         events_list, total = search_events(
             project_id, query, severity, source, event_type,
-            time_from, time_to, size, offset,
+            time_from, time_to, size, offset, host=host,
         )
         if events_list:
             return {"events": events_list, "total": total}
@@ -111,7 +124,7 @@ def list_events(
             .sort([("timestamp", -1), ("_id", -1)])
             .limit(offset + size)
         )
-    merged.sort(key=lambda d: (str(d.get("timestamp", "")), str(d.get("id", ""))), reverse=True)
+    merged.sort(key=_ts_sort_key, reverse=True)
     total_merged = sum(get_events_collection(src).count_documents(q) for src in EVENTS_SOURCES)
     if merged:
         return {

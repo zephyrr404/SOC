@@ -1,8 +1,5 @@
-from __future__ import annotations
-import hashlib
-import secrets
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -73,4 +70,4 @@ class AgentLogBulkEntry(BaseModel):
 
 
 class AgentLogBulk(BaseModel):
-    entries: list[AgentLogBulkEntry]
+    entries: list[AgentLogBulkEntry] = Field(max_length=1000)

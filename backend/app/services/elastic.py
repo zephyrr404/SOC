@@ -67,6 +67,7 @@ def ensure_index():
                         "project_id": {"type": "keyword"},
                         "source": {"type": "keyword"},
                         "event_type": {"type": "keyword"},
+                        "hostname": {"type": "keyword"},
                         "raw": {"type": "object"},
                         "enriched": {
                             "properties": {
@@ -74,6 +75,7 @@ def ensure_index():
                                 "geo": {"type": "object"},
                                 "user_agent_parsed": {"type": "text"},
                                 "risk_score": {"type": "float"},
+                                "severity": {"type": "keyword"},
                             }
                         },
                         "tags": {"type": "keyword"},
@@ -102,7 +104,11 @@ def index_event(event: dict) -> str | None:
     if not _es_up():
         return None
     try:
-        resp = es.index(index=ELASTICSEARCH_INDEX, body=event, refresh="wait_for")
+        doc_id = event.get("id")
+        kwargs = {"index": ELASTICSEARCH_INDEX, "body": event, "refresh": "wait_for"}
+        if doc_id:
+            kwargs["id"] = doc_id
+        resp = es.index(**kwargs)
         return resp["_id"]
     except Exception:
         logger.warning("Failed to index event in ES (ES may be down)")
@@ -130,21 +136,48 @@ def search_events(
     time_to: str = None,
     size: int = 50,
     offset: int = 0,
+    host: str = None,
 ):
     if not _es_up():
         return [], 0
     try:
         must = [{"term": {"project_id": str(project_id)}}]
         if query:
-            must.append({"query_string": {"query": query}})
+            must.append({"simple_query_string": {"query": query}})
         if severity:
-            # Indexed docs carry event_type, not severity — filter the same
-            # field the Mongo fallback path uses so both agree.
-            must.append({"term": {"event_type": severity}})
+            must.append({
+                "bool": {
+                    "should": [
+                        {"term": {"event_type": severity}},
+                        {"term": {"enriched.severity": severity}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            })
         if source:
             must.append({"term": {"source": source}})
         if event_type:
-            must.append({"term": {"event_type": event_type}})
+            must.append({
+                "bool": {
+                    "should": [
+                        {"term": {"event_type": event_type}},
+                        {"term": {"enriched.severity": event_type}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            })
+        if host:
+            must.append({
+                "bool": {
+                    "should": [
+                        {"wildcard": {"hostname.keyword": f"*{host}*"}},
+                        {"wildcard": {"raw.hostname.keyword": f"*{host}*"}},
+                        {"match_phrase": {"hostname": host}},
+                        {"match_phrase": {"raw.hostname": host}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            })
         if time_from or time_to:
             range_filter = {}
             if time_from:
@@ -162,7 +195,7 @@ def search_events(
         resp = es.search(index=ELASTICSEARCH_INDEX, body=body)
         hits = resp["hits"]["hits"]
         return [
-            {"id": h["_id"], **h["_source"]}
+            {"id": h["_source"].get("id") or h["_id"], **h["_source"]}
             for h in hits
         ], resp["hits"]["total"]["value"]
     except Exception:
@@ -251,7 +284,16 @@ def delete_events_by_query(project_id: int, source: str = None, before: str = No
         if source:
             must.append({"term": {"source": source}})
         if hostname:
-            must.append({"term": {"raw.hostname": hostname}})
+            must.append({
+                "bool": {
+                    "should": [
+                        {"term": {"hostname": hostname}},
+                        {"term": {"hostname.keyword": hostname}},
+                        {"term": {"raw.hostname.keyword": hostname}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            })
         if before:
             must.append({"range": {"timestamp": {"lt": before}}})
         resp = es.delete_by_query(

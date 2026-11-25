@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from app.database import get_db, get_next_id, NO_ID
+from app.database import get_next_id, NO_ID
 
 AUDIT_LOG_COLLECTION = "audit_log"
 
@@ -17,7 +17,7 @@ def record_cleanup(db, user, project_id: int, source: str, hostname: str | None,
     db.audit_log.insert_one({
         "id": get_next_id(AUDIT_LOG_COLLECTION),
         "user_id": user["id"],
-        "username": user.get("username", ""),
+        "username": user.get("name") or user.get("email") or user.get("username") or "",
         "project_id": project_id,
         "scope": scope,
         "source": source,

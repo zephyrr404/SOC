@@ -59,6 +59,7 @@ export function getWebsiteKey(projectId) {
 }
 
 export const api = {
+  health: () => request('/health'),
   auth: {
     register: (body) =>
       request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
@@ -277,7 +278,8 @@ export const api = {
   agents: {
     createKey: (label, projectId) =>
       request('/agents/keys', { method: 'POST', body: JSON.stringify({ label, project_id: projectId }) }),
-    listKeys: () => request('/agents/keys'),
+    listKeys: (projectId) =>
+      request(`/agents/keys${projectId != null ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
     revokeKey: (keyId) =>
       request(`/agents/keys/${keyId}`, { method: 'DELETE' }),
     listLogs: (limit = 50, offset = 0, params = {}) => {

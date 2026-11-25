@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ApiBase = $ApiBase.TrimEnd('/')
 
 $hostname = $env:COMPUTERNAME
 $os = (Get-CimInstance Win32_OperatingSystem).Caption
@@ -33,7 +34,7 @@ try {
     $agentId = $enrollResult.agent_id
     Write-Host "Enrolled successfully. Agent ID: $agentId"
 } catch {
-    $statusCode = $_.Exception.Response.StatusCode.value__
+    $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($statusCode -eq 409) {
         $errorDetail = ($_.ErrorDetails.Message | ConvertFrom-Json).detail
         Write-Host "ERROR: Already enrolled to a different system: $errorDetail"
@@ -68,15 +69,15 @@ Set-Content -Path "$agentDir\config.json" -Value $config -Encoding UTF8
 $agentScript = @"
 `$ErrorActionPreference = "Continue"
 
-`$agentDir   = "`$env:ProgramData\SOCAgent"
-`$configPath = Join-Path `$agentDir "config.json"
-`$cursorPath = Join-Path `$agentDir "cursor.json"
+`$global:SocAgentDir   = "`$env:ProgramData\SOCAgent"
+`$global:SocConfigPath = Join-Path `$global:SocAgentDir "config.json"
+`$global:SocCursorPath = Join-Path `$global:SocAgentDir "cursor.json"
 
-function Get-Config {
-    Get-Content `$configPath | ConvertFrom-Json
+function global:Get-SocConfig {
+    Get-Content `$global:SocConfigPath | ConvertFrom-Json
 }
 
-function Re-Enroll {
+function global:Invoke-SocReEnroll {
     param(`$cfg)
     try {
         `$body = @{
@@ -87,10 +88,9 @@ function Re-Enroll {
             fingerprint_seed = (Get-CimInstance Win32_ComputerSystemProduct).UUID
         } | ConvertTo-Json
         `$result = Invoke-RestMethod -Uri "`$(`$cfg.api_base)/agents/enroll" -Method Post -Body `$body -ContentType "application/json"
-        # Update token in config
-        `$updated = Get-Content `$configPath | ConvertFrom-Json
+        `$updated = Get-Content `$global:SocConfigPath | ConvertFrom-Json
         `$updated.agent_token = `$result.agent_token
-        `$updated | ConvertTo-Json | Set-Content `$configPath -Encoding UTF8
+        `$updated | ConvertTo-Json | Set-Content `$global:SocConfigPath -Encoding UTF8
         Write-Host "[SOCAgent] Re-enrolled, new token obtained."
         return `$result.agent_token
     } catch {
@@ -99,17 +99,17 @@ function Re-Enroll {
     }
 }
 
-function Send-Bulk {
+function global:Send-SocBulk {
     param(`$body)
-    `$cfg = Get-Config
+    `$cfg = Get-SocConfig
     try {
         Invoke-RestMethod -Uri "`$(`$cfg.api_base)/agents/logs/bulk" -Method Post -Body `$body -ContentType "application/json" -Headers @{ "Authorization" = "Bearer `$(`$cfg.agent_token)" } | Out-Null
         return `$true
     } catch {
-        `$statusCode = `$_.Exception.Response.StatusCode.value__
+        `$statusCode = if (`$_.Exception.Response) { [int]`$_.Exception.Response.StatusCode } else { 0 }
         if (`$statusCode -eq 401) {
             Write-Host "[SOCAgent] Token expired, re-enrolling..."
-            Re-Enroll -cfg `$cfg | Out-Null
+            Invoke-SocReEnroll -cfg `$cfg | Out-Null
         } else {
             Write-Host "[SOCAgent] Bulk send failed (HTTP `$statusCode): `$_"
         }
@@ -117,16 +117,16 @@ function Send-Bulk {
     }
 }
 
-`$config  = Get-Config
+`$config  = Get-SocConfig
 `$queue   = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
-`$cursors = [Hashtable]::Synchronized(@{})
+`$global:SocCursors = [Hashtable]::Synchronized(@{})
 
 # Load existing cursors
-if (Test-Path `$cursorPath) {
+if (Test-Path `$global:SocCursorPath) {
     try {
-        `$data = Get-Content `$cursorPath | ConvertFrom-Json
+        `$data = Get-Content `$global:SocCursorPath | ConvertFrom-Json
         foreach (`$prop in `$data.PSObject.Properties) {
-            `$cursors[`$prop.Name] = [long]`$prop.Value
+            `$global:SocCursors[`$prop.Name] = [long]`$prop.Value
         }
     } catch { }
 }
@@ -134,23 +134,23 @@ if (Test-Path `$cursorPath) {
 # Split log names from config string
 `$logNames = "$logNamesStr" -split ","
 
-function Save-Cursors {
+function global:Save-SocCursors {
     `$snap = @{}
-    `$cursors.GetEnumerator() | ForEach-Object { `$snap[`$_.Key] = `$_.Value }
-    `$snap | ConvertTo-Json | Set-Content -Path `$cursorPath -Encoding UTF8
+    `$global:SocCursors.GetEnumerator() | ForEach-Object { `$snap[`$_.Key] = `$_.Value }
+    `$snap | ConvertTo-Json | Set-Content -Path `$global:SocCursorPath -Encoding UTF8
 }
 
-# -- Initial catch-up: send recent events since last cursor --
+# -- Initial catch-up: send recent events since last cursor (oldest-first so cursor advances monotonically) --
 foreach (`$logn in `$logNames) {
-    `$lastId = if (`$cursors.ContainsKey(`$logn)) { [long]`$cursors[`$logn] } else { 0 }
+    `$lastId = if (`$global:SocCursors.ContainsKey(`$logn)) { [long]`$global:SocCursors[`$logn] } else { 0 }
     `$events = try {
-        @(Get-WinEvent -FilterXPath "*[System[(EventRecordID > `$lastId)]]" -LogName `$logn -MaxEvents 100 -ErrorAction Stop)
+        @(Get-WinEvent -FilterXPath "*[System[(EventRecordID > `$lastId)]]" -LogName `$logn -MaxEvents 100 -Oldest -ErrorAction Stop)
     } catch { @() }
     foreach (`$evt in `$events) {
         `$queue.Enqueue(@{
             level   = "info"
             stage   = "event_log"
-            message = (`$evt.Message -replace "`r`n"," ")
+            message = (`$evt.Message -replace "`r`n","`n")
             meta    = @{
                 log_name     = `$logn
                 event_id     = [string]`$evt.Id
@@ -160,7 +160,7 @@ foreach (`$logn in `$logNames) {
                 time_created = `$evt.TimeCreated.ToString("o")
             }
         })
-        `$cursors[`$logn] = `$evt.RecordId
+        `$global:SocCursors[`$logn] = `$evt.RecordId
     }
 }
 
@@ -169,7 +169,7 @@ foreach (`$logn in `$logNames) {
 while (`$queue.TryDequeue([ref]`$item)) { `$batch += `$item }
 if (`$batch.Count -gt 0) {
     `$bodyJson = @{ entries = `$batch } | ConvertTo-Json -Depth 10
-    if (Send-Bulk -body `$bodyJson) { Save-Cursors }
+    if (Send-SocBulk -body `$bodyJson) { Save-SocCursors }
 }
 
 # -- Flush timer --
@@ -177,12 +177,12 @@ if (`$batch.Count -gt 0) {
 `$flushTimer.AutoReset = `$true
 Register-ObjectEvent `$flushTimer "Elapsed" -MessageData @{ queue = `$queue } -Action {
     `$md = `$Event.MessageData
-    `$q = if (`$md -and `$md.queue) { `$md.queue } else { `$queue }
+    `$q = `$md.queue
     `$batch = @(); `$item = `$null
     while (`$q.TryDequeue([ref]`$item)) { `$batch += `$item }
     if (`$batch.Count -eq 0) { return }
     `$bodyJson = @{ entries = `$batch } | ConvertTo-Json -Depth 10
-    if (Send-Bulk -body `$bodyJson) { Save-Cursors }
+    if (Send-SocBulk -body `$bodyJson) { Save-SocCursors }
 } | Out-Null
 `$flushTimer.Start()
 Write-Host "[SOCAgent] Flush timer active."
@@ -191,33 +191,33 @@ Write-Host "[SOCAgent] Flush timer active."
 `$heartbeatTimer = New-Object System.Timers.Timer(`$config.heartbeat_interval_seconds * 1000)
 `$heartbeatTimer.AutoReset = `$true
 Register-ObjectEvent `$heartbeatTimer "Elapsed" -Action {
-    `$cfg = Get-Config
+    `$cfg = Get-SocConfig
     `$body = @{ level = "info"; stage = "heartbeat"; message = "Heartbeat"; meta = @{} } | ConvertTo-Json -Depth 5
     try {
         Invoke-RestMethod -Uri "`$(`$cfg.api_base)/agents/logs" -Method Post -Body `$body -ContentType "application/json" -Headers @{ "Authorization" = "Bearer `$(`$cfg.agent_token)" } | Out-Null
     } catch {
-        `$statusCode = `$_.Exception.Response.StatusCode.value__
-        if (`$statusCode -eq 401) { Re-Enroll -cfg `$cfg | Out-Null }
+        `$statusCode = if (`$_.Exception.Response) { [int]`$_.Exception.Response.StatusCode } else { 0 }
+        if (`$statusCode -eq 401) { Invoke-SocReEnroll -cfg `$cfg | Out-Null }
     }
 } | Out-Null
 `$heartbeatTimer.Start()
 Write-Host "[SOCAgent] Heartbeat timer active."
 
-# -- Poll timer: check for new events every 2 seconds --
+# -- Poll timer: check for new events every 2 seconds (oldest-first so cursor advances monotonically) --
 `$pollTimer = New-Object System.Timers.Timer(2000)
 `$pollTimer.AutoReset = `$true
-Register-ObjectEvent `$pollTimer "Elapsed" -MessageData @{ logNames = `$logNames; queue = `$queue; cursors = `$cursors } -Action {
+Register-ObjectEvent `$pollTimer "Elapsed" -MessageData @{ logNames = `$logNames; queue = `$queue; cursors = `$global:SocCursors } -Action {
     `$md = `$Event.MessageData
     foreach (`$logn in `$md.logNames) {
         `$lastId = if (`$md.cursors.ContainsKey(`$logn)) { [long]`$md.cursors[`$logn] } else { 0 }
         `$events = try {
-            @(Get-WinEvent -FilterXPath "*[System[(EventRecordID > `$lastId)]]" -LogName `$logn -MaxEvents 50 -ErrorAction Stop)
+            @(Get-WinEvent -FilterXPath "*[System[(EventRecordID > `$lastId)]]" -LogName `$logn -MaxEvents 50 -Oldest -ErrorAction Stop)
         } catch { @() }
         foreach (`$evt in `$events) {
             `$md.queue.Enqueue(@{
                 level   = "info"
                 stage   = "event_log"
-                message = (`$evt.Message -replace "`r`n"," ")
+                message = (`$evt.Message -replace "`r`n","`n")
                 meta    = @{
                     log_name     = `$logn
                     event_id     = [string]`$evt.Id

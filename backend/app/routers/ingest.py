@@ -4,9 +4,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 from ipaddress import ip_address, ip_network
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
-from app.database import get_db, get_next_id, NO_ID, strip_mongo_id, get_events_collection
+from app.database import get_db, get_events_collection
 from app.services.elastic import index_events_bulk
 from app.services.geoip import lookup as geoip_lookup
 from app.services.threat_feed import is_malicious
@@ -42,7 +42,7 @@ def redact_sensitive_fields(value):
         is_sensitive = False
         for k, v in value.items():
             key = str(k)
-            if key.lower() in ("name", "field"):
+            if key.lower() in ("name", "field") and not name_hint:
                 name_hint = str(v or "")
             if key.lower() == "sensitive":
                 is_sensitive = bool(v)
@@ -184,7 +184,7 @@ def _enrich(event: dict, request: Request) -> dict:
         geo = geoip_lookup(ip)
         if geo:
             enriched["geo"] = geo
-        if is_malicious(ip):
+        if is_malicious(ip, project_id=event.get("project_id")):
             enriched["threat_match"] = True
     if "user_agent_parsed" not in enriched and "user_agent" in event.get("raw", {}):
         enriched["user_agent_parsed"] = str(event["raw"]["user_agent"])
@@ -252,13 +252,25 @@ def _enrich(event: dict, request: Request) -> dict:
         enriched["detections"] = detections
         enriched["risk_score"] = max(enriched.get("risk_score", 0), detections[0]["score"])
 
+    score = float(enriched.get("risk_score") or 0)
+    if score >= 80:
+        enriched["severity"] = "critical"
+    elif score >= 60:
+        enriched["severity"] = "high"
+    elif score >= 30:
+        enriched["severity"] = "medium"
+    elif score > 0 or detections:
+        enriched["severity"] = "low"
+    else:
+        enriched["severity"] = "info"
+
     event["enriched"] = enriched
     # All stored timestamps are offset-form ISO (+00:00), matching the agent
     # pipeline (_normalize_ts) — cleanup cutoffs compare these strings
     # lexicographically, and a Z suffix sorts AFTER +00:00 at equal instants.
     ts = event.get("timestamp")
     if not ts:
-        event["timestamp"] = datetime.now(timezone.utc).isoformat()
+        event["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="microseconds")
     else:
         ts = str(ts)
         if ts.endswith("Z"):
@@ -269,29 +281,40 @@ def _enrich(event: dict, request: Request) -> dict:
     return event
 
 
+MAX_INGEST_BATCH = 200
+
+
 @router.post("/event", summary="Ingest website events (snippet → POST /ingest/event)")
 @router.post("/{project_id}/event", summary="Ingest website events for a specific project")
 async def ingest_event(
     request: Request,
-    background_tasks: BackgroundTasks,
     project_id: int | None = None,
     db=Depends(get_db),
 ):
-    body = await request.json() if request.headers.get("content-type") == "application/json" or request.headers.get("content-length") else {}
-    if not body and hasattr(request, "body"):
+    raw_bytes = await request.body()
+    if not raw_bytes:
+        body = {}
+    else:
         try:
-            import json
-            raw_b = await request.body()
-            body = json.loads(raw_b.decode("utf-8")) if raw_b else {}
-        except Exception:
-            body = {}
+            body = json.loads(raw_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     resolved_id, _ = await run_in_threadpool(_resolve_project_from_request, request, body, db)
     if project_id is not None and resolved_id != project_id:
         raise HTTPException(status_code=403, detail="API key does not belong to specified project")
 
     target_project_id = resolved_id
-    events_list = body.get("events", [body]) if isinstance(body, dict) else [body]
+    if "events" in body:
+        if not isinstance(body["events"], list):
+            raise HTTPException(status_code=400, detail="'events' must be an array")
+        if len(body["events"]) > MAX_INGEST_BATCH:
+            raise HTTPException(status_code=400, detail=f"Batch too large (max {MAX_INGEST_BATCH} events)")
+        events_list = body["events"]
+    else:
+        events_list = [body]
 
     ingested = []
     es_docs = []
@@ -314,8 +337,11 @@ async def ingest_event(
             parsed["page"] = {k: _cap(v, 2000) for k, v in page.items()}
         if isinstance(evt.get("parsed"), dict):
             parsed.update({k: (_cap(v, 500) if isinstance(v, str) else v) for k, v in evt["parsed"].items()})
+        parsed = redact_sensitive_fields(parsed)
 
         raw_data = redact_sensitive_fields(evt.get("raw", evt) if isinstance(evt.get("raw"), dict) else evt)
+        raw_tags = evt.get("tags", [])
+        safe_tags = [str(t)[:64] for t in raw_tags[:20]] if isinstance(raw_tags, list) else []
 
         event = {
             "project_id": str(target_project_id),
@@ -325,7 +351,7 @@ async def ingest_event(
             "source": evt.get("source", "website"),
             "event_type": _cap(evt.get("event_type", "generic"), 80),
             "raw": raw_data,
-            "tags": evt.get("tags", []),
+            "tags": safe_tags,
             "summary": _website_summary(evt.get("event_type", "generic"), raw_data, parsed.get("user"), page),
             "parsed": parsed,
         }

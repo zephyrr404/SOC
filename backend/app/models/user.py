@@ -1,18 +1,17 @@
-from __future__ import annotations
-from datetime import datetime, timezone
-from pydantic import BaseModel
+from datetime import datetime
 from typing import Optional
+from pydantic import BaseModel, Field
 
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
-    name: str
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=6, max_length=72)
+    name: str = Field(min_length=1, max_length=100)
 
 
 class UserLogin(BaseModel):
-    email: str
-    password: str
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=72)
 
 
 class UserResponse(BaseModel):

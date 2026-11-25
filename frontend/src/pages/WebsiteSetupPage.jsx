@@ -102,9 +102,8 @@ export function WebsiteSetupPage() {
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4">
               <p className="text-sm text-sky-600">
                 <span className="font-semibold">CORS:</span> your backend's /ingest/event
-                endpoint must allow requests from your website's origin (separate from the
-                dashboard's own CORS policy) — see Integrations → Backend Setup if this isn't
-                done yet.
+                endpoint allows requests from website origins automatically, separate from
+                the dashboard's own CORS_ORIGINS setting.
               </p>
             </div>
           </div>

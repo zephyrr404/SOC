@@ -3,7 +3,6 @@ import { NavLink } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Menu,
-  X,
   Shield,
   Briefcase,
   LayoutDashboard,

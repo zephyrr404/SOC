@@ -26,12 +26,15 @@ returns the single highest contribution.
 """
 
 import re
-from typing import Any, Iterable
+from typing import Iterable
 
 SEVERITY_TO_SCORE = {"critical": 90, "high": 80, "medium": 60, "low": 30}
 
 # Raw keys that describe navigation/session context, never attack input.
-_CONTEXT_LEAF_KEYS = {"url", "referrer", "user_agent", "hostname", "page_url", "href"}
+_CONTEXT_LEAF_KEYS = {"url", "referrer", "user_agent", "hostname", "page_url", "href", "from", "to"}
+# Metadata keys whose bare numeric values should not synthesize key=value IDOR probes.
+_BENIGN_KV_KEYS = {"id", "seq", "num", "index", "length", "status", "duration_ms", "timing_ms", "x", "y"}
+_SCANNER_HINTS = ("acunetix", "nikto", "nessus", "sqlmap", "dirbuster", "awscan", "fuzz", "xsser")
 
 
 class Rule:
@@ -191,13 +194,18 @@ RULES: list[Rule] = [
 def _fast_miss(value: str) -> bool:
     if len(value) < 3:
         return True
-    return not any(c in value for c in ("'", '"', "<", ">", "/", "\\", ";", "|", "&", "$", "%", "=", ":", "(", ")", "`", ","))
+    if any(c in value for c in ("'", '"', "<", ">", "/", "\\", ";", "|", "&", "$", "%", "=", ":", "(", ")", "`", ",")):
+        return False
+    low = value.lower()
+    return not any(h in low for h in _SCANNER_HINTS)
 
 
 def _is_context(path: tuple) -> bool:
     """True when the field describes navigation/session context."""
     if not path:
         return False
+    if path == ("form", "action"):
+        return True
     return path[0] == "page" or path[-1] in _CONTEXT_LEAF_KEYS
 
 
@@ -225,7 +233,7 @@ def classify_event(payload) -> list[dict]:
             continue
         ctx = _is_context(path)
         candidates = [value]
-        if path:
+        if path and path[-1].lower() not in _BENIGN_KV_KEYS:
             candidates.append(f"{path[-1]}={value}")
         for candidate in candidates:
             for rule in RULES:

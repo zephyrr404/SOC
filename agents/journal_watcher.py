@@ -26,6 +26,7 @@ import time
 
 import requests
 
+CONFIG_FILE = "/etc/soc-agent/config.json"
 CURSOR_FILE = "/etc/soc-agent/journal_cursor"
 FLUSH_INTERVAL = 1.0
 HEARTBEAT_INTERVAL = 30.0
@@ -33,6 +34,8 @@ HEARTBEAT_INTERVAL = 30.0
 _stop = threading.Event()
 _buffer = []
 _lock = threading.Lock()
+_token_lock = threading.Lock()
+_runtime_cfg = {"api_base": "", "agent_token": "", "config_path": CONFIG_FILE}
 
 
 def load_cursor():
@@ -48,10 +51,52 @@ def load_cursor():
 def save_cursor(cursor):
     """Persist the acknowledged cursor so restarts resume without duplicates."""
     try:
+        parent = os.path.dirname(CURSOR_FILE)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(CURSOR_FILE, "w", encoding="utf-8") as f:
             f.write(cursor + "\n")
     except OSError as exc:
         print(f"[journal_watcher] failed to persist cursor: {exc}", file=sys.stderr)
+
+
+def _get_token():
+    with _token_lock:
+        return _runtime_cfg.get("agent_token", "")
+
+
+def _re_enroll(api_base):
+    """Attempt to re-enroll using config.json when the agent token expires."""
+    cfg_path = _runtime_cfg.get("config_path") or CONFIG_FILE
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return None
+    api_key = cfg.get("api_key")
+    if not api_key:
+        return None
+    body = {
+        "api_key": api_key,
+        "hostname": cfg.get("hostname") or os.uname().nodename,
+        "os_type": cfg.get("os_type") or "Linux",
+        "ip_address": "unknown",
+        "fingerprint_seed": cfg.get("fingerprint_seed") or "unknown",
+    }
+    try:
+        resp = requests.post(f"{api_base}/agents/enroll", json=body, timeout=10)
+        resp.raise_for_status()
+        new_token = resp.json().get("agent_token")
+        if new_token:
+            with _token_lock:
+                _runtime_cfg["agent_token"] = new_token
+            cfg["agent_token"] = new_token
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            return new_token
+    except requests.RequestException as exc:
+        print(f"[journal_watcher] re-enroll failed: {exc}", file=sys.stderr)
+    return None
 
 
 def map_entry(obj):
@@ -125,16 +170,22 @@ def stream_journal(meta_base):
             time.sleep(1)
 
 
-def flush_loop(bulk_url, agent_token):
+def flush_loop(bulk_url, api_base):
     """Flush buffered entries every ~1s; persist the cursor only on success."""
-    headers = {"Authorization": f"Bearer {agent_token}", "Content-Type": "application/json"}
     while not _stop.is_set():
         with _lock:
             batch = _buffer[:]
             del _buffer[:]
         if batch:
+            token = _get_token()
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             try:
                 resp = requests.post(bulk_url, json={"entries": batch}, headers=headers, timeout=10)
+                if resp.status_code == 401:
+                    new_tok = _re_enroll(api_base)
+                    if new_tok:
+                        headers["Authorization"] = f"Bearer {new_tok}"
+                        resp = requests.post(bulk_url, json={"entries": batch}, headers=headers, timeout=10)
                 resp.raise_for_status()
                 last_cursor = batch[-1]["meta"].get("cursor") or ""
                 if last_cursor:
@@ -150,12 +201,13 @@ def flush_loop(bulk_url, agent_token):
         _stop.wait(FLUSH_INTERVAL)
 
 
-def heartbeat_loop(bulk_url, agent_token):
+def heartbeat_loop(bulk_url, api_base):
     """Keep the agent's last_seen_at fresh while the journal feed is silent."""
-    headers = {"Authorization": f"Bearer {agent_token}", "Content-Type": "application/json"}
     while not _stop.is_set():
+        token = _get_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         try:
-            requests.post(
+            resp = requests.post(
                 bulk_url,
                 json={
                     "entries": [
@@ -170,6 +222,8 @@ def heartbeat_loop(bulk_url, agent_token):
                 headers=headers,
                 timeout=10,
             )
+            if resp.status_code == 401:
+                _re_enroll(api_base)
         except requests.RequestException as exc:
             print(f"[journal_watcher] heartbeat failed: {exc}", file=sys.stderr)
         _stop.wait(HEARTBEAT_INTERVAL)
@@ -209,7 +263,7 @@ def _load_uid_names(path="/etc/passwd"):
     return names
 
 
-def audit_stream_loop(meta_base, bulk_url, agent_token):
+def audit_stream_loop(meta_base):
     """Tail auditd's execve records — every command executed, with the real
     (audit) user who ran it. auditd writes each execve as a set of correlated
     records sharing one msg id: SYSCALL (exe/comm/auid) → EXECVE (argv chunks)
@@ -226,7 +280,6 @@ def audit_stream_loop(meta_base, bulk_url, agent_token):
         return
     uid_names = _load_uid_names()
     pending = {}
-    headers = {"Authorization": f"Bearer {agent_token}", "Content-Type": "application/json"}
 
     def handle(line):
         m = _AUDIT_RECORD_RE.match(line)
@@ -253,6 +306,8 @@ def audit_stream_loop(meta_base, bulk_url, agent_token):
     def emit(rec):
         argv = [a for a in rec["argv"] if a and a != "NULL"]
         cmd = " ".join(argv) or rec["exe"] or rec["comm"]
+        if rec["auid"] not in uid_names:
+            uid_names.update(_load_uid_names())
         name = uid_names.get(rec["auid"], rec["auid"])
         with _lock:
             _buffer.append(
@@ -304,20 +359,44 @@ def audit_stream_loop(meta_base, bulk_url, agent_token):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"usage: {sys.argv[0]} <api_base> <agent_token>", file=sys.stderr)
+    api_base = ""
+    agent_token = ""
+    config_path = CONFIG_FILE
+    if len(sys.argv) == 3 and sys.argv[1] == "--config":
+        config_path = sys.argv[2]
+    elif len(sys.argv) == 3:
+        api_base = sys.argv[1].rstrip("/")
+        agent_token = sys.argv[2]
+    elif len(sys.argv) != 1:
+        print(f"usage: {sys.argv[0]} [--config <path> | <api_base> <agent_token>]", file=sys.stderr)
         return 1
 
-    api_base = sys.argv[1].rstrip("/")
-    agent_token = sys.argv[2]
+    if not api_base or not agent_token:
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            api_base = str(cfg.get("api_base") or "").rstrip("/")
+            agent_token = str(cfg.get("agent_token") or "")
+        except (OSError, ValueError) as exc:
+            print(f"[journal_watcher] failed to load config {config_path}: {exc}", file=sys.stderr)
+            return 1
+
+    if not api_base or not agent_token:
+        print("[journal_watcher] api_base and agent_token are required", file=sys.stderr)
+        return 1
+
+    _runtime_cfg["api_base"] = api_base
+    _runtime_cfg["agent_token"] = agent_token
+    _runtime_cfg["config_path"] = config_path
+
     bulk_url = f"{api_base}/agents/logs/bulk"
     meta_base = {"log_name": "system", "log_type": "linux"}
 
     threads = [
         threading.Thread(target=stream_journal, args=(meta_base,), daemon=True),
-        threading.Thread(target=flush_loop, args=(bulk_url, agent_token), daemon=True),
-        threading.Thread(target=heartbeat_loop, args=(bulk_url, agent_token), daemon=True),
-        threading.Thread(target=audit_stream_loop, args=(meta_base, bulk_url, agent_token), daemon=True),
+        threading.Thread(target=flush_loop, args=(bulk_url, api_base), daemon=True),
+        threading.Thread(target=heartbeat_loop, args=(bulk_url, api_base), daemon=True),
+        threading.Thread(target=audit_stream_loop, args=(meta_base,), daemon=True),
     ]
     for thread in threads:
         thread.start()

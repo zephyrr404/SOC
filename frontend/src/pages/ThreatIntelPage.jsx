@@ -42,20 +42,20 @@ function flagEmoji(countryCode) {
 
 function sevPill(eventType) {
   const t = eventType || '';
-  if (t === 'critical') return 'bg-red-500/12 text-red-600';
+  if (t === 'critical') return 'bg-red-500/[0.12] text-red-600';
   if (t === 'high') return 'bg-amber-500/15 text-amber-600';
   if (t === 'medium') return 'bg-yellow-500/15 text-yellow-600';
-  if (t === 'low') return 'bg-blue-500/12 text-blue-600';
+  if (t === 'low') return 'bg-blue-500/[0.12] text-blue-600';
   return 'bg-soc-panel text-soc-muted';
 }
 
 function statusPill(status) {
   const s = status || 'new';
-  if (s === 'resolved') return 'bg-green-600/12 text-green-700';
+  if (s === 'resolved') return 'bg-green-600/[0.12] text-green-700';
   if (s === 'false_positive') return 'bg-soc-panel text-soc-muted';
   if (s === 'investigating') return 'bg-amber-500/15 text-amber-600';
-  if (s === 'acknowledged') return 'bg-blue-500/12 text-blue-600';
-  return 'bg-red-500/12 text-red-600';
+  if (s === 'acknowledged') return 'bg-blue-500/[0.12] text-blue-600';
+  return 'bg-red-500/[0.12] text-red-600';
 }
 
 function sourceBadge(source) {
@@ -914,7 +914,7 @@ export function ThreatIntelPage() {
               <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
               <YAxis yAxisId="count" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} />
               <YAxis yAxisId="risk" orientation="right" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} domain={[0, 100]} />
-              <Tooltip contentStyle={{ background: '#0B1120', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 8, fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E4E7EB', borderRadius: 10, color: '#0F172A', fontSize: 11, boxShadow: '0 8px 24px -8px rgba(15,23,42,0.18)' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Bar yAxisId="count" dataKey="count" name="events" fill="#2563EB" radius={[3, 3, 0, 0]} maxBarSize={28} />
               <Line yAxisId="risk" type="monotone" dataKey="avg" name="avg risk" stroke="#DC2626" strokeWidth={1.8} dot={false} />
@@ -1130,7 +1130,7 @@ export function ThreatIntelPage() {
                     <button
                       key={h.hostname}
                       onClick={() => setHostFilter(active ? '' : h.hostname)}
-                      className={`w-full grid grid-cols-[2rem_1.4fr_1fr_0.7fr_1fr_0.7fr] gap-3 items-center text-sm rounded-lg px-3 py-1.5 transition-colors text-left ${
+                      className={`group w-full grid grid-cols-[2rem_1.4fr_1fr_0.7fr_1fr_0.7fr] gap-3 items-center text-sm rounded-lg px-3 py-1.5 transition-colors text-left ${
                         active ? 'bg-soc-accent/10 border border-soc-accent/40' : 'hover:bg-soc-panel border border-transparent'
                       }`}
                       title="Filter the page + seed the correlation graph on this host"
@@ -1187,7 +1187,7 @@ export function ThreatIntelPage() {
                       <span className="text-xs font-medium text-soc-text">{item.avg_risk}</span>
                       <span className="text-[10px] text-soc-muted truncate" title={(item.hosts || []).join(', ')}>{(item.hosts || []).join(', ') || '—'}</span>
                       <span className="text-xs text-soc-muted truncate">{item.country ? `${flagEmoji(item.country)} ${item.country}${item.city ? ` · ${item.city}` : ''}` : '—'}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded w-fit ${item.is_known_bad ? 'bg-red-500/12 text-red-600' : 'bg-soc-panel text-soc-muted'}`}>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded w-fit ${item.is_known_bad ? 'bg-red-500/[0.12] text-red-600' : 'bg-soc-panel text-soc-muted'}`}>
                         {item.is_known_bad ? 'known-bad' : 'observed'}
                       </span>
                       <button
@@ -1304,7 +1304,7 @@ export function ThreatIntelPage() {
       <div className="glass-card rounded-xl p-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-soc-text">Matched Events</h2>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${matches.length > 0 ? 'bg-red-500/12 text-red-600' : 'bg-soc-panel text-soc-muted'}`}>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${matches.length > 0 ? 'bg-red-500/[0.12] text-red-600' : 'bg-soc-panel text-soc-muted'}`}>
             {matches.length} matching events{feedFilter ? ` · feed: ${feedFilter}` : ''}
           </span>
         </div>
@@ -1486,11 +1486,11 @@ export function ThreatIntelPage() {
             </div>
             <div className="max-h-64 overflow-y-auto p-2 space-y-1">
               <p className="text-[10px] uppercase tracking-wide text-soc-muted px-2 pt-1">Open incidents</p>
-              {(openIncidents || []).filter((i) => i.status !== 'resolved').length === 0 ? (
+              {(openIncidents || []).filter((i) => i.status !== 'resolved' && i.status !== 'false_positive').length === 0 ? (
                 <p className="text-xs text-soc-muted px-2 py-2">No open incidents — create one first.</p>
               ) : (
                 (openIncidents || [])
-                  .filter((i) => i.status !== 'resolved')
+                  .filter((i) => i.status !== 'resolved' && i.status !== 'false_positive')
                   .map((i) => (
                     <button
                       key={i.id}

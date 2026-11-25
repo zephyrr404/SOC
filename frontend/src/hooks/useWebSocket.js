@@ -44,13 +44,6 @@ export function useWebSocket(projectId, onEvent) {
   const reconnect = useCallback(() => {
     if (!projectId || !mountedRef.current) return;
     const token = localStorage.getItem('soc_token');
-    if (!token) {
-      // Cookie-authed session without a stored token (e.g. cleared site
-      // data): WS auth needs the token, but the cookie-based HTTP poll
-      // still works — fall back to it instead of staying dark forever.
-      startPolling(projectId);
-      return;
-    }
 
     // Close any existing connection
     if (wsRef.current) {
@@ -58,7 +51,8 @@ export function useWebSocket(projectId, onEvent) {
       wsRef.current.close();
     }
 
-    const ws = new WebSocket(`${WS_BASE}/ws/projects/${projectId}/live?token=${token}`);
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    const ws = new WebSocket(`${WS_BASE}/ws/projects/${projectId}/live${qs}`);
 
     ws.onopen = () => {
       if (!mountedRef.current) return;

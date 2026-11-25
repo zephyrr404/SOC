@@ -1,12 +1,11 @@
 .git
 .gitignore
 frontend
-deploy
-docs
 __pycache__
 *.pyc
 .venv
 venv
 *.mmdb
 .env
+backend/.env
 *.log

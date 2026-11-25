@@ -13,6 +13,7 @@ const PAGE_TITLES = [
   { re: /^\/incidents$/, title: 'Incidents' },
   { re: /^\/api-keys$/, title: 'API Keys' },
   { re: /^\/integrations$/, title: 'Integrations' },
+  { re: /^\/website-setup$/, title: 'Website Setup' },
   { re: /^\/data-cleanup$/, title: 'Data Cleanup' },
 ];
 

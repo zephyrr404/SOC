@@ -24,6 +24,11 @@ WINDOWS_EVENT_TEMPLATES = {
     4725: ("account_disabled", "User account disabled: {user}"),
     4726: ("account_deleted", "User account deleted: {user}"),
     4740: ("account_locked", "User account locked out: {user}"),
+    4756: ("group_member_added", "Member added to a security-enabled universal group"),
+    4768: ("kerberos_tgt_requested", "Kerberos TGT requested for {user} from {ip}"),
+    4769: ("kerberos_service_ticket", "Kerberos service ticket requested for {user} from {ip}"),
+    4771: ("kerberos_preauth_failed", "Kerberos pre-authentication failed for {user} from {ip}"),
+    4776: ("credential_validation", "Credential validation attempted for {user}"),
     4688: ("process_created", "New process created: {process}"),
     4732: ("group_member_added", "Member added to a security-enabled local group"),
     1102: ("audit_log_cleared", "Security audit log was cleared"),
@@ -91,9 +96,13 @@ def _extract_ip(message: str) -> str | None:
 def _extract(message: str, key: str) -> str | None:
     if key == "user":
         m = re.search(
-            r"Account For Which Logon Failed:[^\r\n]*\r?\n\s*Security ID:[^\r\n]*\r?\n\s*Account Name:\s*(\S+)",
+            r"Account For Which Logon Failed:.*?Security ID:.*?Account Name:\s*(\S+)",
             message,
+            re.IGNORECASE | re.DOTALL,
         )
+        if m and _valid_user(m.group(1)):
+            return m.group(1).strip()
+        m = re.search(r"Target Account:.*?Account Name:\s*(\S+)", message, re.IGNORECASE | re.DOTALL)
         if m and _valid_user(m.group(1)):
             return m.group(1).strip()
         m = re.search(r"New User Name:\s*(\S+)", message)
@@ -300,6 +309,11 @@ _LINUX_PATTERNS = [
         "process_exec",
         lambda m: {"user": m.group(1), "cmd": m.group(2).strip()},
     ),
+    (
+        r"new user:\s*name=([^,\s]+)",
+        "account_added",
+        lambda m: {"user": m.group(1)},
+    ),
 ]
 
 _LINUX_SUMMARY_TEMPLATES = {
@@ -308,6 +322,7 @@ _LINUX_SUMMARY_TEMPLATES = {
     "invalid_user": "Login attempt with invalid user {user} from {ip}",
     "sudo_command": "Sudo command by {user}: {cmd}",
     "process_exec": "Command executed by {user}: {cmd}",
+    "account_added": "User account created: {user}",
     "session_open": "Session opened for {user}",
     "session_closed": "Session closed for {user}",
 }

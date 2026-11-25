@@ -27,9 +27,9 @@ const SEVERITY_CLASS = {
 const SEVERITIES = ['all', 'critical', 'high', 'medium', 'low', 'info'];
 
 function riskBadgeClass(score) {
-  if (score >= 70) return 'bg-red-500/12 text-red-600';
+  if (score >= 70) return 'bg-red-500/[0.12] text-red-600';
   if (score >= 40) return 'bg-amber-500/15 text-amber-600';
-  if (score >= 15) return 'bg-blue-500/12 text-blue-600';
+  if (score >= 15) return 'bg-blue-500/[0.12] text-blue-600';
   return 'bg-soc-panel text-soc-muted';
 }
 
@@ -139,15 +139,15 @@ const EventRow = memo(
             {event.source}
           </span>
           {(event.category === 'heartbeat' || event.category === 'lifecycle') && (
-            <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${event.category === 'heartbeat' ? 'bg-blue-500/12 text-blue-600' : 'bg-soc-panel text-soc-muted'}`}>
+            <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${event.category === 'heartbeat' ? 'bg-blue-500/[0.12] text-blue-600' : 'bg-soc-panel text-soc-muted'}`}>
               {event.category}
             </span>
           )}
           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-            event.event_type === 'critical' ? 'bg-red-500/12 text-red-600' :
+            event.event_type === 'critical' ? 'bg-red-500/[0.12] text-red-600' :
             event.event_type === 'high' ? 'bg-amber-500/15 text-amber-600' :
             event.event_type === 'medium' ? 'bg-yellow-500/15 text-yellow-600' :
-            'bg-blue-500/12 text-blue-600'
+            'bg-blue-500/[0.12] text-blue-600'
           }`}>
             {event.event_type}
           </span>
@@ -238,7 +238,7 @@ export function LiveEventsPage() {
   const categoryParam = searchParams.get('category') || 'all';
 
   const [searchText, setSearchText] = useState(queryParam);
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState(queryParam);
   const [expanded, setExpanded] = useState(null);
   const [events, setEvents] = useState([]);
   const [sortBy, setSortBy] = useState('time');
@@ -255,9 +255,11 @@ export function LiveEventsPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   useEffect(() => {
-    if (queryParam && queryParam !== searchText) {
+    if (queryParam !== searchText) {
       setSearchText(queryParam);
+      setDebouncedQuery(queryParam);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryParam]);
 
   useEffect(() => {
@@ -513,7 +515,7 @@ export function LiveEventsPage() {
                   : 'Agent events go to the project of the agent key used at install time'}
               </p>
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => refetchInitial()}
                 className="text-xs text-soc-accent hover:underline mt-2"
               >
                 Reload

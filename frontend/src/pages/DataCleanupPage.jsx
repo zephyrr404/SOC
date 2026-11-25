@@ -130,7 +130,7 @@ export function DataCleanupPage() {
   const [exactBefore, setExactBefore] = useState(localNow());
 
   const [preview, setPreview] = useState(null);
-  const [previewKey, setPreviewKey] = useState('');
+  const [refreshTick, setRefreshTick] = useState(0);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState('');
@@ -154,7 +154,8 @@ export function DataCleanupPage() {
       before = new Date(Date.now() - presetDays * 24 * 60 * 60 * 1000).toISOString();
     }
     return { source: 'all', before };
-  }, [timeMode, presetDays, exactBefore]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeMode, presetDays, exactBefore, refreshTick]);
 
   const filtersKey = JSON.stringify(filters);
   const previewIsCurrent = preview && preview.key === filtersKey;
@@ -372,7 +373,7 @@ export function DataCleanupPage() {
               </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => runPreview(filtersKey)}
+                onClick={() => setRefreshTick((t) => t + 1)}
                 disabled={isPreviewing}
                 className="flex items-center gap-2 text-xs bg-soc-panel hover:bg-soc-panel text-soc-text px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
               >
@@ -430,7 +431,7 @@ export function DataCleanupPage() {
               <button
                 onClick={handleDelete}
                 disabled={!previewIsCurrent || total === 0 || confirmText !== 'DELETE' || isDeleting}
-                className="flex items-center gap-2 text-xs bg-red-500/12 hover:bg-red-500/15 text-red-600 border border-red-500/25 px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 text-xs bg-red-500/[0.12] hover:bg-red-500/15 text-red-600 border border-red-500/25 px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 title={
                   !previewIsCurrent
                     ? 'Preview must run for the current filters first'

@@ -49,25 +49,25 @@ function evRisk(snap) {
 }
 
 function riskBadgeClass(score) {
-  if (score >= 70) return 'bg-red-500/12 text-red-600';
+  if (score >= 70) return 'bg-red-500/[0.12] text-red-600';
   if (score >= 40) return 'bg-amber-500/15 text-amber-600';
-  if (score >= 15) return 'bg-blue-500/12 text-blue-600';
+  if (score >= 15) return 'bg-blue-500/[0.12] text-blue-600';
   return 'bg-soc-panel text-soc-muted';
 }
 
 function severityBadgeClass(sev) {
-  if (sev === 'critical') return 'bg-red-500/12 text-red-600';
+  if (sev === 'critical') return 'bg-red-500/[0.12] text-red-600';
   if (sev === 'high') return 'bg-amber-500/15 text-amber-600';
-  if (sev === 'medium') return 'bg-sky-500/12 text-sky-600';
-  return 'bg-emerald-500/12 text-emerald-600';
+  if (sev === 'medium') return 'bg-sky-500/[0.12] text-sky-600';
+  return 'bg-emerald-500/[0.12] text-emerald-600';
 }
 
 function statusBadgeClass(status) {
-  if (status === 'resolved') return 'bg-emerald-500/12 text-emerald-600';
+  if (status === 'resolved') return 'bg-emerald-500/[0.12] text-emerald-600';
   if (status === 'investigating') return 'bg-amber-500/15 text-amber-600';
-  if (status === 'contained') return 'bg-blue-500/12 text-blue-600';
+  if (status === 'contained') return 'bg-blue-500/[0.12] text-blue-600';
   if (status === 'false_positive') return 'bg-soc-panel text-soc-muted';
-  return 'bg-red-500/12 text-red-600';
+  return 'bg-red-500/[0.12] text-red-600';
 }
 
 // Markdown-lite: **bold** + "- " list lines. Escaped first, then marked up.
@@ -226,7 +226,7 @@ function EvidencePickerModal({ open, projectId, incidentId, onClose, onAdded }) 
                   <span className="flex items-center gap-2 mb-0.5">
                     <span className="text-[10px] text-soc-muted-cool">{formatLocalTime(ev.timestamp)}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      ev.event_type === 'critical' ? 'bg-red-500/12 text-red-600' :
+                      ev.event_type === 'critical' ? 'bg-red-500/[0.12] text-red-600' :
                       ev.event_type === 'high' ? 'bg-amber-500/15 text-amber-600' :
                       'bg-soc-panel text-soc-muted'
                     }`}>{ev.event_type}</span>
@@ -385,6 +385,11 @@ export function IncidentDetailPage() {
   });
 
   useEffect(() => {
+    setAssigneeInit(false);
+    setAssignee('');
+  }, [iid]);
+
+  useEffect(() => {
     if (incident && !assigneeInit) {
       setAssignee(incident.assigned_to != null ? String(incident.assigned_to) : '');
       setAssigneeInit(true);
@@ -528,6 +533,7 @@ export function IncidentDetailPage() {
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <input
+              key={incident.id}
               defaultValue={incident.title}
               onBlur={(e) => handleUpdate('title', e.target.value)}
               className="text-xl font-bold bg-transparent border-b border-transparent hover:border-soc-accent/40 focus:border-soc-accent focus:outline-none w-full"
@@ -581,7 +587,7 @@ export function IncidentDetailPage() {
               {t}
             </Link>
           ))}
-          {(() => { const a = agingLabel(incident); return a ? <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.hot ? 'bg-red-500/12 text-red-600' : 'bg-amber-500/15 text-amber-600'}`}>{a.text}</span> : null; })()}
+          {(() => { const a = agingLabel(incident); return a ? <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.hot ? 'bg-red-500/[0.12] text-red-600' : 'bg-amber-500/15 text-amber-600'}`}>{a.text}</span> : null; })()}
           <span className="text-[10px] text-soc-muted ml-2">
             Created {formatLocalDate(incident.created_at)} · Updated {formatLocalDate(incident.updated_at)}
           </span>
@@ -631,6 +637,7 @@ export function IncidentDetailPage() {
           )}
         </div>
         <textarea
+          key={incident.id}
           defaultValue={incident.description || ''}
           onBlur={(e) => handleUpdate('description', e.target.value)}
           placeholder="Description..."
@@ -680,7 +687,7 @@ export function IncidentDetailPage() {
                   )}
                   {snapshot?.event_type && (
                     <span className={`px-1.5 py-0.5 rounded ${
-                      snapshot.event_type === 'critical' ? 'bg-red-500/12 text-red-600' :
+                      snapshot.event_type === 'critical' ? 'bg-red-500/[0.12] text-red-600' :
                       snapshot.event_type === 'high' ? 'bg-amber-500/15 text-amber-600' :
                       'bg-soc-panel text-soc-muted'
                     }`}>{snapshot.event_type}</span>

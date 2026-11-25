@@ -1,11 +1,11 @@
 import secrets
 import hashlib
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
-from app.database import get_db, get_next_id, NO_ID
+from fastapi import APIRouter, Depends
+from app.database import get_db, get_next_id
 from app.auth import get_current_user
 from app.dependencies import get_owned_project, get_owned_api_key
-from app.models.api_key import ApiKeyCreate, ApiKeyResponse, ApiKeyCreated
+from app.models.api_key import ApiKeyCreate, ApiKeyCreated
 from app.services.reachable import reachable_backend_url
 from app.services.prompt_templates import build_ai_agent_prompt
 

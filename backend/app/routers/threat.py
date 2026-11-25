@@ -165,17 +165,20 @@ def _window_start(window: str) -> datetime:
 
 
 def _view_events_in_window(project_id: int, db, start: datetime, collections=None, projection=None):
-    """Security-view events for a project since `start` (Python-side ts filter).
-
-    Mirrors the overview router's approach: Mongo narrows by project + view
-    condition, the caller filters by parsed timestamp so both ISO strings and
-    datetime docs behave identically.
-    """
+    """Security-view events for a project since `start` (index-backed + exact ts filter)."""
     pid_q = {"$in": [project_id, str(project_id)]}
+    start_hint = (start - timedelta(seconds=1)).isoformat()
     cols = collections or all_events_collections()
     out = []
     for col in cols:
-        for e in col.find({"project_id": pid_q, "$and": [EVENTS_VIEW_COND]}, projection or NO_ID):
+        q = {
+            "project_id": pid_q,
+            "$and": [
+                EVENTS_VIEW_COND,
+                {"$or": [{"timestamp": {"$gte": start_hint}}, {"timestamp": {"$gte": start}}]},
+            ],
+        }
+        for e in col.find(q, projection or NO_ID):
             ts = _parse_ts(e.get("timestamp"))
             if ts and ts >= start:
                 out.append((e, ts))
@@ -286,7 +289,7 @@ def _match_indicator(event: dict, manual: list[dict]) -> dict | None:
         ip = (event.get(field) or {}).get("ip") or ""
         if ip:
             break
-    if ip and threat_feed.is_malicious(ip):
+    if ip and threat_feed.is_malicious(ip, project_id=event.get("project_id")):
         for m in manual:
             if m.get("type") == "ip" and str(m.get("value")) == ip:
                 return {"value": ip, "type": "ip", "category": m.get("category", "manual"), "source": "manual"}
@@ -630,10 +633,20 @@ def threat_timeline(
         try:
             must = [
                 {"term": {"project_id": pid_str}},
+                {"terms": {"source": ["windows", "linux"]}},
                 {"range": {"timestamp": {"gte": start.isoformat()}}},
             ]
             if host:
-                must.append({"term": {"hostname": host}})
+                must.append({
+                    "bool": {
+                        "should": [
+                            {"term": {"hostname": host}},
+                            {"term": {"hostname.keyword": host}},
+                            {"term": {"raw.hostname.keyword": host}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                })
             if technique_id:
                 must.append({"wildcard": {"mitre.technique": f"{technique_id}*"}})
             if min_severity and min_severity in _SEV_MIN_RISK:

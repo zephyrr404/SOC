@@ -26,6 +26,7 @@ def reachable_backend_url() -> str:
     this machine's LAN IP so a website on another device gets a real host.
     Configure PUBLIC_BACKEND_URL to a public HTTPS domain for production.
     """
-    if PUBLIC_BACKEND_URL and "localhost" not in PUBLIC_BACKEND_URL and "127.0.0.1" not in PUBLIC_BACKEND_URL:
-        return PUBLIC_BACKEND_URL.replace("/", "")
+    url = (PUBLIC_BACKEND_URL or "").strip().rstrip("/")
+    if url and "localhost" not in url and "127.0.0.1" not in url:
+        return url
     return f"http://{_lan_ip()}:8000"

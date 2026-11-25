@@ -1,5 +1,3 @@
-const IST_TZ = 'Asia/Kolkata';
-
 export function toDate(isoString) {
   if (!isoString) return null;
   if (isoString instanceof Date) return isNaN(isoString.getTime()) ? null : isoString;
@@ -15,7 +13,6 @@ export function formatLocalTime(isoString) {
   const date = toDate(isoString);
   if (!date) return isoString || '';
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: IST_TZ,
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
@@ -27,7 +24,6 @@ export function formatLocalDate(isoString) {
   const date = toDate(isoString);
   if (!date) return isoString || '';
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: IST_TZ,
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -49,7 +45,6 @@ export function formatChartBucket(key) {
   const date = new Date(iso);
   if (isNaN(date.getTime())) return str;
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: IST_TZ,
     ...(str.length <= 10
       ? { month: 'short', day: 'numeric' }
       : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }),

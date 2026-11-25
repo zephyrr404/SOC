@@ -20,8 +20,9 @@ export function APIKeysPage() {
   });
 
   const { data: agentKeys, isLoading: agentKeysLoading, isError: agentKeysError, refetch: refetchAgentKeys } = useQuery({
-    queryKey: ['agent-keys'],
-    queryFn: () => api.agents.listKeys(),
+    queryKey: ['agent-keys', pid],
+    queryFn: () => api.agents.listKeys(pid),
+    enabled: !!pid,
   });
 
   const addToast = useToastStore((s) => s.addToast);
